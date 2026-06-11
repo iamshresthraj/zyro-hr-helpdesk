@@ -1,0 +1,14 @@
+torch
+torchvision
+transformers
+accelerate
+diffusers
+xformers
+gradio
+Pillow
+pandas
+scipy
+ftfy
+open_clip_torch
+scikit-learn
+numpy
