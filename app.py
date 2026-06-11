@@ -23,16 +23,13 @@ st.caption("Powered by RAG + Groq | Ask anything about HR policies")
 
 @st.cache_resource(show_spinner="Loading HR policy documents...")
 def load_pipeline():
-    # Load PDFs
     loader = PyPDFDirectoryLoader(CORPUS_PATH)
     docs = loader.load()
 
-    # Fix filename metadata
     for doc in docs:
         src = doc.metadata.get("source", "")
         doc.metadata["filename"] = os.path.basename(src)
 
-    # Chunk
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=800,
         chunk_overlap=150,
@@ -40,20 +37,17 @@ def load_pipeline():
     )
     chunks = splitter.split_documents(docs)
 
-    # Embed
     emb = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2",
         encode_kwargs={"normalize_embeddings": True},
     )
 
-    # Vector store
     vs = FAISS.from_documents(chunks, emb)
     retriever = vs.as_retriever(
         search_type="mmr",
         search_kwargs={"k": 5, "fetch_k": 20, "lambda_mult": 0.7},
     )
 
-    # LLM
     llm = ChatGroq(
         api_key=GROQ_API_KEY,
         model="llama-3.3-70b-versatile",
@@ -61,7 +55,6 @@ def load_pipeline():
         max_tokens=512,
     )
 
-    # RAG prompt
     rag_prompt = ChatPromptTemplate.from_messages([
         ("system",
          "You are ZyroHR, the official HR Help Desk assistant for Zyro Dynamics Pvt. Ltd. "
@@ -76,7 +69,6 @@ def load_pipeline():
         ("human", "HR Policy Context:\n{context}\n\nEmployee Question: {question}\n\nAnswer:"),
     ])
 
-    # Classifier prompt
     oos_prompt = ChatPromptTemplate.from_messages([
         ("system",
          "You are a query classifier for the Zyro Dynamics HR Help Desk.\n"
@@ -102,7 +94,6 @@ def load_pipeline():
         )
 
     def ask(question):
-        # Classify
         label = (oos_prompt | llm | StrOutputParser()).invoke({"question": question}).strip().upper()
         if "HR-RELATED" not in label:
             return {
@@ -113,11 +104,9 @@ def load_pipeline():
                 "is_hr": False,
             }
 
-        # Retrieve
         rdocs = retriever.invoke(question)
         context = format_docs(rdocs)
 
-        # Generate
         chain = (
             {"context": lambda _: context, "question": RunnablePassthrough()}
             | rag_prompt
@@ -125,15 +114,13 @@ def load_pipeline():
             | StrOutputParser()
         )
         answer = chain.invoke(question)
-
-        # Collect unique source filenames
         sources = sorted({d.metadata.get("filename", "HR Policy") for d in rdocs})
 
         return {"answer": answer, "sources": sources, "is_hr": True}
 
     return ask
 
-# Session state
+# Session state init
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -143,14 +130,14 @@ if not GROQ_API_KEY:
 
 ask = load_pipeline()
 
-# Render chat history
+# Render full chat history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg.get("sources"):
             st.caption("Sources: " + " | ".join(msg["sources"]))
 
-# Suggested questions on empty state
+# Suggested questions — only show when chat is empty
 if not st.session_state.messages:
     st.markdown("**Suggested questions:**")
     suggestions = [
@@ -165,32 +152,26 @@ if not st.session_state.messages:
     for i, s in enumerate(suggestions):
         with (col1 if i % 2 == 0 else col2):
             if st.button(s, key=f"s{i}", use_container_width=True):
+                # Add user message
                 st.session_state.messages.append({"role": "user", "content": s})
+                # Get answer immediately
+                with st.spinner("Searching HR policies..."):
+                    result = ask(s)
+                # Add assistant message
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": result["answer"],
+                    "sources": result["sources"],
+                    "is_hr": result["is_hr"],
+                })
                 st.rerun()
-
-# Handle suggestion button press
-if (st.session_state.messages
-        and st.session_state.messages[-1]["role"] == "user"
-        and len(st.session_state.messages) % 2 == 1):
-    last_q = st.session_state.messages[-1]["content"]
-    with st.chat_message("user"):
-        st.markdown(last_q)
-    with st.chat_message("assistant"):
-        with st.spinner("Searching HR policies..."):
-            result = ask(last_q)
-        st.markdown(result["answer"])
-        if result["sources"]:
-            st.caption("Sources: " + " | ".join(result["sources"]))
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": result["answer"],
-        "sources": result["sources"],
-        "is_hr": result["is_hr"],
-    })
 
 # Chat input
 if prompt := st.chat_input("Ask about leave, salary, benefits, WFH, performance..."):
+    # Add user message
     st.session_state.messages.append({"role": "user", "content": prompt})
+
+    # Get answer
     with st.chat_message("user"):
         st.markdown(prompt)
     with st.chat_message("assistant"):
@@ -199,6 +180,8 @@ if prompt := st.chat_input("Ask about leave, salary, benefits, WFH, performance.
         st.markdown(result["answer"])
         if result["sources"]:
             st.caption("Sources: " + " | ".join(result["sources"]))
+
+    # Add assistant message
     st.session_state.messages.append({
         "role": "assistant",
         "content": result["answer"],
