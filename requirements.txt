@@ -1,3 +1,4 @@
+streamlit
 langchain
 langchain-community
 langchain-text-splitters
@@ -7,10 +8,3 @@ langchain-core
 faiss-cpu
 pypdf
 sentence-transformers
-transformers
-torch
-huggingface_hub
-groq
-streamlit
-langsmith
-cryptography
